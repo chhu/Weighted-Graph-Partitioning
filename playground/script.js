@@ -61,6 +61,7 @@ var pressure = new Array(n_cluster + 1);
 var prev_pressure = new Array(n_cluster + 1);
 
 var desired_count = new Array(n_cluster + 1);
+var endangered = new Array(n_cluster + 1);
 var urf_c = 1;
 var urf_p = 1;
 
@@ -82,15 +83,6 @@ for (var i = 0; i < 256; i++) {
 
 
 // Init
-
-// Percentage of domain
-/*
-pressure[1] = 0.5;
-pressure[2] = 0.25;
-pressure[3] = 0.125;
-pressure[4] = 0.125/2;
-pressure[5] = 0.125/2;
-*/
 function restart() {
   ts=0;
   n_cluster = Number(document.getElementById("np").value);
@@ -128,22 +120,22 @@ function restart() {
   for (let i = 1; i <= n_cluster; i++) {
       desired_count[i] = pressure[i] = prev_pressure[i] = weights[i-1] * n_total  - 1;  // -1 because we have initialized a seed point
     //  seed_index = width * (i + 10) + 20 + 10*i;
+      /*
       if (prev_pfield[seed_index] != 0) {
         while (!prev_pfield[(++seed_index) % n_total]) ;
-      }
+      }*/
         //console.log("LOST " + i);
       prev_pfield[seed_index] = i;  // seed
       prev_cfield[seed_index] = 10;  // seed
-      //seed_index +=  weights[i-1] * n_total; // Math.floor(Math.random() * Math.floor(width * height));
+      //seed_index += Math.floor(desired_count[i]) ; // Math.floor(Math.random() * Math.floor(width * height));
       seed_index =  Math.floor(Math.random() * Math.floor(width * height));
   }
   prev_pressure[0] = pressure[0] = -n_total + n_cluster;
+  endangered.fill(true);endangered[0] = false;
   main();
 
 }
-
-var boost = n_cluster;
-
+var fudge = Math.PI;
 function rule(current, neighbors, ccurrent, cneighbors) {
   let own_sum = 0; let own_count = 0; let own_max = 0;
   let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0;
@@ -158,21 +150,22 @@ function rule(current, neighbors, ccurrent, cneighbors) {
         foreign_count++;
     }
 
-  let local_boost = (desired_count[current] - prev_pressure[current]) < 10 ? boost : 0;
   let new_ccurrent = current == 0 ? 0 :
-//  (Math.max(prev_pressure[current], 0) / n_total + bias + local_boost + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / neighbors.length);// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
-    prev_pressure[current] / n_total + bias + local_boost + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / neighbors.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
-  //if (new_ccurrent > n_total / n_cluster)
-  //  new_ccurrent = n_total / n_cluster;
-  if (new_ccurrent < 0)
+    (prev_pressure[current] / n_total) / (fudge * weights[current-1]) + bias + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / neighbors.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
+
+  if (new_ccurrent < 0) // Anti-chaos rule
     new_ccurrent =0 ;
-  if (foreign_count == 0)
+  if (new_ccurrent > 10)
+    new_ccurrent = 10;
+
+  if (foreign_count == 0 || endangered[current]) // Shortcut
       return [current, new_ccurrent];
 
   let max_cn = AMaxI(cneighbors);
   let new_current = own_max >= foreign_max ? current : neighbors[max_cn[1]];
   if (new_current == 0) // Never let vacuum grow
     new_current = current;
+  
   pressure[new_current]--;
   pressure[current]++;
   return [new_current, new_ccurrent];
@@ -209,18 +202,15 @@ function applyGraphRule(fr) {
         }
     }
 
-    for (let i = 0; i < cfield.length; i++) {
-        prev_cfield[i] = (1 - urf_c) * prev_cfield[i] + urf_c * cfield[i];
-        //if (prev_cfield[i] < 0) prev_cfield[i] = 0;
-    }
-    for (let i = 1; i < pressure.length; i++) {
-        prev_pressure[i] = (1 - urf_p) * prev_pressure[i] + urf_p * pressure[i];
-    }
-    //prev_cfield.set(cfield);
+    prev_cfield.set(cfield);
     prev_pfield.set(pfield);
+    prev_pressure = pressure.slice();
+
     if (pressure[0] == 0)
       bias = n_cluster / n_total;
-    let ostr = "TS: " + fr + " Pressure: " + AMax(pressure)/*.join(", ") */+ " Max C: " + AMax(cfield);// + " Min C: " + AMin(cfield);
+    for (let i = 1; i <= n_cluster; i++)
+      endangered[i] = (desired_count[i] - pressure[i] < (0.1 * desired_count[i]));
+    let ostr = "Iter: " + fr + " Max imbalance (nodes): " + AMax(pressure)/*.join(", ") */+ " Max Potential: " + AMax(cfield);// + " Min C: " + AMin(cfield);
     document.getElementById("info").innerHTML = ostr;
 }
 
@@ -261,13 +251,20 @@ ts = 0;
 halt = false;
 // Main loop
 function main(tframe) {
+
     // Request animation frames
     //if (ts < 2000)
-    if (!halt) window.requestAnimationFrame(main);
+    if (!halt) 
+      window.requestAnimationFrame(main);
+//    for (let i = 0; i < (tframe ? tframe : 5); i++) {
     for (let i = 0; i < 5; i++) {
-        ts++;
-        applyGraphRule(ts);
+      ts++;
+      applyGraphRule(ts);
     }
+    //
+    //for (let i = 1; i <= n_cluster; i++)
+    //  if (desired_count[i] - prev_pressure[i] < 1 )
+    //    restart();//alert(ts + ":  Partition " + i + " died.");
     // Create the image
     createImage(ts);
     // Draw the image data to the canvas

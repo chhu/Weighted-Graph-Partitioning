@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 </head>
 <body>
-  <div id="info" style="font-family:monospace;font-size:xx-large">PARTITION INFO</div>
+  <div id="info" style="font-family:monospace;font-size:large">PARTITION INFO</div>
   <div>
     <button onclick="halt=!halt;main()">PAUSE</button>
     N_PARTITIONS:<input id="np" type="text" size="5" value="20" maxlength="4"/>
-    W0:<input id="w0" type="text" size="5" maxlength="4" value="0"/>
-    W1:<input id="w1" type="text" size="5" maxlength="4" value="0"/>
+    W0:<input id="w0" type="text" size="6" maxlength="5" value="0.25"/>
+    W1:<input id="w1" type="text" size="6" maxlength="5" value="0.25"/>
     <button onclick="restart()">Restart</button>
   </div>
   <canvas id="view1" width="200" height="200" style="width: 49%"></canvas>

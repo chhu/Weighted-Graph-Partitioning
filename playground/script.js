@@ -1,29 +1,14 @@
 // Helper
-function AMax(arr) {
-  let result = arr[0];
-  for (let i = 0; i < arr.length; i++)
-      if (arr[i] > result)
-          result = arr[i];
-  return result;
+Float64Array.prototype.max = Array.prototype.max = function() {
+  return this.reduce((a, b)=> Math.max(a, b));
 }
 
-function AMin(arr) {
-  let result = arr[0];
-  for (let i = 1; i < arr.length; i++)
-      if (arr[i] < result)
-          result = arr[i];
-  return result;
+Float64Array.prototype.min = Array.prototype.min = function() {
+  return this.reduce((a, b)=> Math.min(a, b));
 }
 
-function AMaxI(arr) {
-  let result = arr[0];
-  let imax = 0;
-  for (let i = 1; i < arr.length; i++)
-      if (arr[i] > result) {
-          result = arr[i];
-          imax = i;
-        }
-  return [result, imax];
+Float64Array.prototype.sum = Array.prototype.sum = function() {
+  return this.reduce((a, b)=> a+b);
 }
 
 function clr(arr, val) {
@@ -49,29 +34,19 @@ var imagedata2 = context2.createImageData(width, height);
 var n_cluster = 20;
 
 var n_total = width * height;
-var bias = 0;//n_cluster / n_total;//1/(width*height);
+var bias = 0.1;//n_cluster / n_total;//1/(width*height);
 
 var pfield = new Uint32Array(width * height);
-var prev_pfield = new Uint32Array(width * height);
-
 var cfield = new Float64Array(width * height);
-var prev_cfield = new Float64Array(width * height);
-
 var pressure = new Array(n_cluster + 1);
-var prev_pressure = new Array(n_cluster + 1);
-
 var desired_count = new Array(n_cluster + 1);
 var endangered = new Array(n_cluster + 1);
-var urf_c = 1;
-var urf_p = 1;
 
 function sin_col(i, size, phase) {
   var sin = Math.sin(Math.PI / (size / 2) * i + phase);
   var int = Math.floor(sin * 127) + 128;
   return int;
 }
-
-cb_p = new Array(n_cluster + 1);
 
 var cb_c = new Array(256);
 for (var i = 0; i < 256; i++) {
@@ -80,7 +55,6 @@ for (var i = 0; i < 256; i++) {
   var green = Math.min(i/100,1) * sin_col(i, 255, 2 * Math.PI * 2/3); // 240 deg
   cb_c[i] = [red, green, blue];
 }
-
 
 // Init
 function restart() {
@@ -94,18 +68,19 @@ function restart() {
     var green = sin_col(i, n_cluster + 1, 2 * Math.PI * 2/3); // 240 deg
     cb_p[i] = [red, green, blue];
   }
+ cb_p[1] = [155,155,155]; 
+ cb_p[2] = [128,128,128]; 
 
 
   w0 = Number(document.getElementById("w0").value)
   w1 = Number(document.getElementById("w1").value)
   pressure = new Array(n_cluster + 1);
-  prev_pressure = new Array(n_cluster + 1);
   weights = new Array(n_cluster);
   weights.fill(0);
   weights[0] = w0;
   weights[1] = w1;
   // auto balance
-  let weights_sum = weights.reduce((ts, el)=>ts+=el, 0);
+  let weights_sum = weights.sum()
   if (weights_sum > 1 || weights_sum < 0)
     return;
   let zero_count = weights.reduce((ts, el)=>ts+=(el==0?1:0), 0);
@@ -114,110 +89,90 @@ function restart() {
   console.log(remainder);
   weights = weights.map(e=>e==0?remainder:e);
 
-  prev_pfield = prev_pfield.map(e=>0);
-  prev_cfield = prev_cfield.map(e=>0);
+  bias = 1/(weights.min()*n_total);
+
+  pfield.fill(0);
+  cfield.fill(0);
+
   let seed_index = 0;
+  pressure[0] = 0; desired_count[0] = 0;
   for (let i = 1; i <= n_cluster; i++) {
-      desired_count[i] = pressure[i] = prev_pressure[i] = weights[i-1] * n_total  - 1;  // -1 because we have initialized a seed point
-    //  seed_index = width * (i + 10) + 20 + 10*i;
-      /*
-      if (prev_pfield[seed_index] != 0) {
-        while (!prev_pfield[(++seed_index) % n_total]) ;
-      }*/
-        //console.log("LOST " + i);
-      prev_pfield[seed_index] = i;  // seed
-      prev_cfield[seed_index] = 10;  // seed
-      //seed_index += Math.floor(desired_count[i]) ; // Math.floor(Math.random() * Math.floor(width * height));
       seed_index =  Math.floor(Math.random() * Math.floor(width * height));
+      while (pfield[seed_index] != 0)
+        seed_index =  Math.floor(Math.random() * Math.floor(width * height));
+
+      pfield[seed_index] = i;  // seed
+      cfield[seed_index] = 10;  // seed
+
+      desired_count[i] = pressure[i] = Math.round(weights[i-1] * n_total) ;  // -1 because we have initialized a seed point
+      pressure[i]--;
+      //seed_index += Math.floor(desired_count[i]) ; // Math.floor(Math.random() * Math.floor(width * height));
   }
-  prev_pressure[0] = pressure[0] = -n_total + n_cluster;
+  pressure[1] += n_total - desired_count.sum();
+  desired_count[1] += n_total - desired_count.sum();
+
+  pressure[0] = -n_total + n_cluster;
   endangered.fill(true);endangered[0] = false;
-  main();
+  halt = true;
+  setTimeout(main, 1000);
+  setTimeout(()=>halt=false,900);
 
-}
-var fudge = Math.PI;
-function rule(current, neighbors, ccurrent, cneighbors) {
-  let own_sum = 0; let own_count = 0; let own_max = 0;
-  let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0;
-  for (let i = 0; i < neighbors.length; i++)
-    if (neighbors[i] == current) {
-        own_sum += cneighbors[i];
-        own_max = Math.max(own_max, cneighbors[i]);
-        own_count++;
-    } else {
-        foreign_sum += cneighbors[i];
-        foreign_max = Math.max(foreign_max, cneighbors[i]);
-        foreign_count++;
-    }
-
-  let new_ccurrent = current == 0 ? 0 :
-    (prev_pressure[current] / n_total) / (fudge * weights[current-1]) + bias + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / neighbors.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
-
-  if (new_ccurrent < 0) // Anti-chaos rule
-    new_ccurrent =0 ;
-  if (new_ccurrent > 10)
-    new_ccurrent = 10;
-
-  if (foreign_count == 0 || endangered[current]) // Shortcut
-      return [current, new_ccurrent];
-
-  let max_cn = AMaxI(cneighbors);
-  let new_current = own_max >= foreign_max ? current : neighbors[max_cn[1]];
-  if (new_current == 0) // Never let vacuum grow
-    new_current = current;
-  
-  pressure[new_current]--;
-  pressure[current]++;
-  return [new_current, new_ccurrent];
 }
 
 function applyGraphRule(fr) {
-    // Loop over all of the pixels
-    for (var x=0; x<width; x++) {
-        for (var y=0; y<height; y++) {
-            // Get the pixel index
-            let pixelindex = (y * width + x);
-            // Constructing a 4-neighborhood graph
-            let ne = [];
-            let cne = [];
-            if (x > 0) {
-              ne.push(prev_pfield[pixelindex - 1]);
-              cne.push(prev_cfield[pixelindex - 1]);
-            }
-            if (y > 0) {
-              ne.push(prev_pfield[pixelindex - width]);
-              cne.push(prev_cfield[pixelindex - width]);
-            }
-            if (x < width - 1) {
-              ne.push(prev_pfield[pixelindex + 1]);
-              cne.push(prev_cfield[pixelindex + 1]);
-            }
-            if (y < height - 1) {
-              ne.push(prev_pfield[pixelindex + width]);
-              cne.push(prev_cfield[pixelindex + width]);
-            }
-            let result = rule(prev_pfield[pixelindex], ne, prev_cfield[pixelindex], cne);
-            pfield[pixelindex] = result[0];
-            cfield[pixelindex] = result[1];
+    // Loop over all pixels
+    for (let pixelindex = 0; pixelindex < n_total; pixelindex++) {
+        let ne = graph[pixelindex];
+        let current = pfield[pixelindex];
+        let ccurrent = cfield[pixelindex];
+
+        let own_sum = 0; let own_count = 0; let own_max = 0; 
+        let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0; let foreign_max_ind = -1;
+        for (let ne_idx of ne) {
+          let cne = cfield[ne_idx];
+          if (pfield[ne_idx] == current) {
+              own_sum += cne;
+              own_max = Math.max(own_max, cne);
+              own_count++;
+          } else {
+              foreign_sum += cne;
+              if (cne > foreign_max) {
+                foreign_max = cne;
+                foreign_max_index = ne_idx;
+              }
+              foreign_count++;
+          }
         }
+
+        let power = current == 0 ? 0 : (pressure[current] / n_total) / (weights[current-1]) + bias;
+        if (power < 0)
+          power = 0;
+        let new_ccurrent = current == 0 ? 0 :
+          power + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
+        if (new_ccurrent < 0)
+          new_ccurrent = 0;        
+        cfield[pixelindex] = new_ccurrent;
+        if (foreign_count == 0 || endangered[current]) { // Shortcut
+          continue;
+        }
+
+        let new_current = own_max >= foreign_max ? current : pfield[foreign_max_index];
+        if (new_current == 0) // Never let vacuum grow
+          continue;
+        
+        pressure[new_current]--;
+        pressure[current]++;
+        pfield[pixelindex] = new_current;
     }
 
-    prev_cfield.set(cfield);
-    prev_pfield.set(pfield);
-    prev_pressure = pressure.slice();
-
-    if (pressure[0] == 0)
-      bias = n_cluster / n_total;
     for (let i = 1; i <= n_cluster; i++)
-      endangered[i] = (desired_count[i] - pressure[i] < (0.1 * desired_count[i]));
-    let ostr = "Iter: " + fr + " Max imbalance (nodes): " + AMax(pressure)/*.join(", ") */+ " Max Potential: " + AMax(cfield);// + " Min C: " + AMin(cfield);
-    document.getElementById("info").innerHTML = ostr;
+      endangered[i] = ((desired_count[i] - pressure[i]) < (0.5 * desired_count[i]));
 }
 
 // Create the image
 function createImage(offset) {
-    var cmax = AMax(cfield);
-    var cmin = AMin(cfield);
+    var cmax = cfield.max();
+    var cmin = cfield.min();
     // Loop over all of the pixels
     for (var x=0; x<width; x++) {
         for (var y=0; y<height; y++) {
@@ -248,7 +203,32 @@ function createImage(offset) {
 }
 
 ts = 0;
-halt = false;
+halt = false ;
+
+// Loop over all pixels to create graph
+graph = [];
+console.log(width + " " + height);
+for (var y=0; y<height; y++) {
+  for (var x=0; x<width; x++) {
+        // Get the pixel index
+        let pixelindex = (y * width + x);
+        // Constructing a 4-neighborhood graph
+        let ne = [];
+        if (x > 0) {
+          ne.push(pixelindex - 1);
+        }
+        if (y > 0) {
+          ne.push(pixelindex - width);
+        }
+        if (x < width - 1) {
+          ne.push(pixelindex + 1);
+        }
+        if (y < height - 1) {
+          ne.push(pixelindex + width);
+        }
+        graph.push(ne);
+    }
+}
 // Main loop
 function main(tframe) {
 
@@ -257,10 +237,12 @@ function main(tframe) {
     if (!halt) 
       window.requestAnimationFrame(main);
 //    for (let i = 0; i < (tframe ? tframe : 5); i++) {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 50; i++) {
       ts++;
       applyGraphRule(ts);
     }
+    let ostr = "Iter: " + ts + " Max imbalance (nodes): " + pressure.max().toFixed(2)/*.join(", ") */+ " Max Potential: " + cfield.max().toFixed(2) + " Avg Potential: " + cfield.sum() / n_total;// + " Min C: " + AMin(cfield);
+    document.getElementById("info").innerHTML = ostr;
     //
     //for (let i = 1; i <= n_cluster; i++)
     //  if (desired_count[i] - prev_pressure[i] < 1 )

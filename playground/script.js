@@ -162,11 +162,55 @@ function applyGraphRule(fr) {
         
         pressure[new_current]--;
         pressure[current]++;
+        endangered[current] = (desired_count[current] - pressure[current]) < (0.5 * desired_count[current]);
+        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.5 * desired_count[new_current]);
         pfield[pixelindex] = new_current;
     }
+    for (let pixelindex = n_total-1; pixelindex >= 0; pixelindex--) {
+        let ne = graph[pixelindex];
+        let current = pfield[pixelindex];
+        let ccurrent = cfield[pixelindex];
 
-    for (let i = 1; i <= n_cluster; i++)
-      endangered[i] = ((desired_count[i] - pressure[i]) < (0.5 * desired_count[i]));
+        let own_sum = 0; let own_count = 0; let own_max = 0; 
+        let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0; let foreign_max_ind = -1;
+        for (let ne_idx of ne) {
+          let cne = cfield[ne_idx];
+          if (pfield[ne_idx] == current) {
+              own_sum += cne;
+              own_max = Math.max(own_max, cne);
+              own_count++;
+          } else {
+              foreign_sum += cne;
+              if (cne > foreign_max) {
+                foreign_max = cne;
+                foreign_max_index = ne_idx;
+              }
+              foreign_count++;
+          }
+        }
+
+        let power = current == 0 ? 0 : (pressure[current] / n_total) / (weights[current-1]) + bias;
+        if (power < 0)
+          power = 0;
+        let new_ccurrent = current == 0 ? 0 :
+          power + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
+        if (new_ccurrent < 0)
+          new_ccurrent = 0;        
+        cfield[pixelindex] = new_ccurrent;
+        if (foreign_count == 0 || endangered[current]) { // Shortcut
+          continue;
+        }
+
+        let new_current = own_max >= foreign_max ? current : pfield[foreign_max_index];
+        if (new_current == 0) // Never let vacuum grow
+          continue;
+        
+        pressure[new_current]--;
+        pressure[current]++;
+        endangered[current] = (desired_count[current] - pressure[current]) < (0.5 * desired_count[current]);
+        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.5 * desired_count[new_current]);
+        pfield[pixelindex] = new_current;
+    }
 }
 
 // Create the image

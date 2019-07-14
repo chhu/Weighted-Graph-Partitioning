@@ -22,6 +22,9 @@ using namespace std;
 
 namespace wpart {
 
+#define likely(x)	__builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 struct CAPart {
 	valarray<double> pressure;		// Contains imbalances of each domain. Positive VAL at index X means: Domain X need to grow VAL nodes
 	valarray<double> desired;		// Contains calculated n nodes from weights
@@ -34,7 +37,6 @@ struct CAPart {
 	// INPUT
 	vector<vector<int32_t> > graph;	// Connections between nodes, first vector's size determines N nodes.
 	valarray<double> weights;		// Size of that vector determines how many partitions will be created. Zero weight means auto-calc weight from remainder
-	valarray<size_t> seeds;			// Node indices of seed points. Must be same size as weights or seeds will be auto-distributed.
 
 	// OUTPUT ( / INPUT if pre-seeded)
 	valarray<int32_t> partitioning; // Domain index for each node
@@ -54,29 +56,26 @@ struct CAPart {
 		partitioning.resize(n_nodes, -1);
 	};
 
-	// preseeded expects a domain decomposition present in partitioning. It will adjust that according to weights.
+	// preseeded (or pre-partitioned) expects either a domain decomposition present
+	// in the partitioning valarray; it will adjust / update that according to weights.
+	// Another possibility is that only seeds are present (single index), the rest
+	// left to void (-1).
 	void init(bool preseeded) {
 		assert(n_nodes > 10);
 		assert(n_partitions >= 2);
 		assert((n_partitions * 10) < n_nodes);
 
 		if (preseeded) {
-			assert((partitioning >= 0).sum());
-			assert((partitioning < (int)n_partitions).sum());
+			assert((partitioning >= 0).sum());	// There must be a
+			assert(partitioning.max() < (int)n_partitions);
 		} else {
 			partitioning = -1;
-			// Place seed.
-			if (seeds.size() != n_partitions) {
-				// Auto-seed
-				seeds.resize(n_partitions);
-				uint32_t step = n_nodes/ n_partitions - 1;
-				for (int i = 0; i < n_partitions; i++)	// distribute linear within nodes
-					seeds[i]  = step * i + rand() % step;
-			}
-			for (int i = 0; i < n_partitions; i++)
-				partitioning[seeds[i]] = i;
+			// Place seeds
+			uint32_t step = n_nodes/ n_partitions - 1;
+			for (int i = 0; i < n_partitions; i++)	// distribute with random offset within linear (1D) partition
+				partitioning[step * i + rand() % step] = i;
 		}
-		potential[partitioning >= 0] = 1;
+		potential[partitioning >= 0] = 1 / ((partitioning == -1).sum() + 1);
 
 		// Translate weights to node counts
 		double total_weights = weights.sum();
@@ -95,11 +94,10 @@ struct CAPart {
 		}
 		pressure[0] += n_nodes - pressure.sum(); // Total must be equal to n_nodes, rounding errors get added to first domain
 		desired = pressure;
-		if (preseeded) {	// Adjust pressure based on current partitioning
-			for (int i = 0; i < n_nodes; i++)
+		// Adjust pressure according to actual partition or seeds.
+		for (int i = 0; i < n_nodes; i++)
+			if (partitioning[i] >= 0)
 				pressure[partitioning[i]]--;
-		} else
-			pressure -= 1;  // Because one seed exists per domain
 	}
 
 	uint32_t step() {
@@ -114,14 +112,14 @@ struct CAPart {
 			double other_sum = 0, other_max = 0;
 
 			int current_domain = partitioning[i];
-			double pot_current = potential[i];
+			double current_potential = potential[i];
 
 			for (unsigned i_n = 0; i_n < neighbors.size(); i_n++) {
 				uint32_t ne = neighbors[i_n];
 				int32_t neighbor_domain = partitioning[ne];
 				double neighbor_potential = potential[ne];
 
-				if (neighbor_domain == current_domain) {
+				if (likely(neighbor_domain == current_domain)) {
 					own_sum += neighbor_potential;
 					own_max = max(own_max, neighbor_potential);
 					own_count++;
@@ -134,28 +132,25 @@ struct CAPart {
 					other_count++;
 				}
 			}
-	        bool endangered = false;
-			if (current_domain >= 0) {
-				double power = (pressure[current_domain] / n_nodes) / (weights[current_domain]);
-				if (power < 0)
-					power = 0;
-				double pot_new = power + 0.5 * pot_current + 0.5 * (own_sum - other_sum) / neighbors.size();
-				if (pot_new < 0)
-					pot_new = 0;
 
-				potential[i] = pot_new;
-				endangered = (desired[current_domain] - pressure[current_domain]) < (0.5 * desired[current_domain]);
+			if (likely(current_domain >= 0)) {	// Update potential field
+				double power = max((pressure[current_domain] / n_nodes) / (weights[current_domain]), 0.);
+				potential[i] = max(power + 0.5 * current_potential + 0.5 * (own_sum - other_sum) / neighbors.size(), 0.);
+
+				// Endangered domain?
+				if (unlikely((desired[current_domain] - pressure[current_domain]) < (0.5 * desired[current_domain])))
+					continue;
 			}
 
-	        if (other_count == 0 || endangered) { // Shortcut
+	        if (likely(other_count == 0)) // Shortcut
 	          continue;
-	        }
 
-	        if (current_domain >= 0)
+	        if (likely(current_domain >= 0))
 	        	border_count[current_domain]++; // Just because 'others' are neighboring
 
-	        if (own_max < other_max) { // We alter domain for node i
-		        if (current_domain >= 0) pressure[current_domain]++;
+	        if (own_max < other_max) { // We alter domain for node i, likely-hood of branch 50/50.
+		        if (likely(current_domain >= 0))
+		        	pressure[current_domain]++;
 		        pressure[other_max_domain]--;
 
 		        partitioning[i] = other_max_domain;
@@ -166,6 +161,9 @@ struct CAPart {
 		return alterations;
 	}
 
+	// Helpers
+
+	// Return max potential (centroid) positions for domains
 	valarray<size_t> peaks() {
 		valarray<size_t> result(n_partitions);result = 0;
 		valarray<double> pot_peak(0., n_partitions);
@@ -180,14 +178,16 @@ struct CAPart {
 			}
 		}
 		return result;
-
 	}
 
-	// Takes current peak-pot locations as seeds and resets
+	// Takes current peak-pot locations as seed and resets
 	void restart() {
-		seeds = peaks();
-		init(false);
-
+		valarray<size_t> pks = peaks();
+		partitioning = -1;
+		for (int i = 0; i < pks.size(); i++) {
+			partitioning[pks[i]] = i;
+		}
+		init(true);
 	}
 };
 };

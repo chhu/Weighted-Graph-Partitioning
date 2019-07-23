@@ -17,6 +17,8 @@
 #include <valarray>
 #include <math.h>
 #include <stdint.h>
+#include <iostream>
+#include <fstream>
 
 using namespace std;
 
@@ -42,8 +44,15 @@ struct CAPart {
 	valarray<int32_t> partitioning; // Domain index for each node
 
 	uint32_t iteration;
+	bool	no_alterations;
+	double	bias;
 
-	CAPart(uint32_t n_nodes_, uint32_t n_partitions_) {
+	CAPart(uint32_t n_nodes_, uint32_t n_partitions_, const char* grf_name = NULL) {
+		ifstream grf;
+		if (grf_name) { // Open grf file and read n_nodes
+			grf.open(grf_name, ifstream::in);
+			grf >> n_nodes_;grf >> n_nodes_;
+		}
 		n_nodes = n_nodes_;
 		n_partitions = n_partitions_;
 		graph.resize(n_nodes);
@@ -54,6 +63,23 @@ struct CAPart {
 		border_count.resize(n_partitions, 0);
 		potential.resize(n_nodes, -1.);
 		partitioning.resize(n_nodes, -1);
+		no_alterations = false;
+		bias = 0;
+		if (grf.is_open()) { // Read graph from file
+			int dummy, entries, i = 0;
+			grf >> dummy;grf >> dummy;grf >> dummy; // Values on graph info should probably not be ignored
+			assert(dummy == 0);
+			while (grf >> entries) {
+				assert( i < n_nodes);
+				for (int j = 0; j < entries; j++) {
+					grf >> dummy;
+					graph[i].push_back(dummy);
+					assert(dummy < n_nodes);
+				}
+				i++;
+			}
+			grf.close();
+		}
 	};
 
 	// preseeded (or pre-partitioned) expects either a domain decomposition present
@@ -89,6 +115,7 @@ struct CAPart {
 			remainder /= unset_count;
 			weights[weights == 0.] = remainder;
 		}
+		bias = 1/(weights.min() * n_nodes);
 		for (int i = 0; i < n_partitions; i++) {
 			pressure[i] = round(n_nodes * weights[i]);
 		}
@@ -134,6 +161,8 @@ struct CAPart {
 				double power = (pressure[current_domain] / n_nodes) / (weights[current_domain]);
 				if (power < 0)
 					power = 0;
+				else
+					power += bias;
 
 				potential[i] = power + (own_sum - other_sum) / neighbors.size();
 
@@ -148,7 +177,7 @@ struct CAPart {
 	        if (likely(current_domain >= 0))	// Mark as halo cell
 	        	border_count[current_domain]++; // Just because 'others' are neighboring
 
-	        if (potential[i] < 0) { // We alter domain for node i, likely-hood of branch 50/50.
+	        if (potential[i] < 0 && !no_alterations) { // We alter domain for node i, likely-hood of branch 50/50.
 		        if (likely(current_domain >= 0))
 		        	pressure[current_domain]++;
 		        pressure[other_max_domain]--;

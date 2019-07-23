@@ -31,16 +31,10 @@ var height = canvas1.height;
 var imagedata1 = context1.createImageData(width, height);
 var imagedata2 = context2.createImageData(width, height);
 
-var n_cluster = 20;
-
 var n_total = width * height;
-var bias = 0.1;//n_cluster / n_total;//1/(width*height);
 
 var pfield = new Uint32Array(width * height);
 var cfield = new Float64Array(width * height);
-var pressure = new Array(n_cluster + 1);
-var desired_count = new Array(n_cluster + 1);
-var endangered = new Array(n_cluster + 1);
 
 function sin_col(i, size, phase) {
   var sin = Math.sin(Math.PI / (size / 2) * i + phase);
@@ -76,6 +70,7 @@ function restart() {
   w1 = Number(document.getElementById("w1").value)
   pressure = new Array(n_cluster + 1);
   weights = new Array(n_cluster);
+  endangered = new Array(n_cluster + 1);
   weights.fill(0);
   weights[0] = w0;
   weights[1] = w1;
@@ -104,8 +99,8 @@ function restart() {
       pfield[seed_index] = i;  // seed
       cfield[seed_index] = 10;  // seed
 
-      desired_count[i] = pressure[i] = Math.round(weights[i-1] * n_total) ;  // -1 because we have initialized a seed point
-      pressure[i]--;
+      desired_count[i] = pressure[i] = Math.round(weights[i-1] * n_total) ;  
+      pressure[i]--; // -1 because we have initialized a seed point
       //seed_index += Math.floor(desired_count[i]) ; // Math.floor(Math.random() * Math.floor(width * height));
   }
   pressure[1] += n_total - desired_count.sum();
@@ -120,17 +115,21 @@ function restart() {
 }
 
 function applyGraphRule(fr) {
+
+    let pressure_prev = pressure.slice();
+    let cfield_prev   = cfield.slice();
+    let pfield_prev   = pfield.slice();
     // Loop over all pixels
     for (let pixelindex = 0; pixelindex < n_total; pixelindex++) {
         let ne = graph[pixelindex];
-        let current = pfield[pixelindex];
-        let ccurrent = cfield[pixelindex];
+        let current = pfield_prev[pixelindex];
+        let ccurrent = cfield_prev[pixelindex];
 
         let own_sum = 0; let own_count = 0; let own_max = 0; 
-        let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0; let foreign_max_ind = -1;
+        let foreign_sum = 0; let foreign_count = 0; let foreign_max = -999; let foreign_max_ind = -1;
         for (let ne_idx of ne) {
-          let cne = cfield[ne_idx];
-          if (pfield[ne_idx] == current) {
+          let cne = cfield_prev[ne_idx];
+          if (pfield_prev[ne_idx] == current) {
               own_sum += cne;
               own_max = Math.max(own_max, cne);
               own_count++;
@@ -143,72 +142,29 @@ function applyGraphRule(fr) {
               foreign_count++;
           }
         }
-
-        let power = current == 0 ? 0 : (pressure[current] / n_total) / (weights[current-1]) + bias;
+        
+        let power = current == 0 ? 0 : (pressure_prev[current] / n_total) / (weights[current-1]);
         if (power < 0)
           power = 0;
+        else 
+          power += bias;
+
         let new_ccurrent = current == 0 ? 0 :
-          power + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
-        if (new_ccurrent < 0)
-          new_ccurrent = 0;        
+          power + (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
         cfield[pixelindex] = new_ccurrent;
         if (foreign_count == 0 || endangered[current]) { // Shortcut
           continue;
         }
 
-        let new_current = own_max >= foreign_max ? current : pfield[foreign_max_index];
-        if (new_current == 0) // Never let vacuum grow
+//        let new_current = own_sum+new_ccurrent > foreign_sum ? current : pfield_prev[foreign_max_index];
+        let new_current = new_ccurrent > 0 ? current : pfield_prev[foreign_max_index];
+        if (new_current == 0 || new_current == current) // Never let vacuum grow
           continue;
         
         pressure[new_current]--;
         pressure[current]++;
-        endangered[current] = (desired_count[current] - pressure[current]) < (0.5 * desired_count[current]);
-        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.5 * desired_count[new_current]);
-        pfield[pixelindex] = new_current;
-    }
-    for (let pixelindex = n_total-1; pixelindex >= 0; pixelindex--) {
-        let ne = graph[pixelindex];
-        let current = pfield[pixelindex];
-        let ccurrent = cfield[pixelindex];
-
-        let own_sum = 0; let own_count = 0; let own_max = 0; 
-        let foreign_sum = 0; let foreign_count = 0; let foreign_max = 0; let foreign_max_ind = -1;
-        for (let ne_idx of ne) {
-          let cne = cfield[ne_idx];
-          if (pfield[ne_idx] == current) {
-              own_sum += cne;
-              own_max = Math.max(own_max, cne);
-              own_count++;
-          } else {
-              foreign_sum += cne;
-              if (cne > foreign_max) {
-                foreign_max = cne;
-                foreign_max_index = ne_idx;
-              }
-              foreign_count++;
-          }
-        }
-
-        let power = current == 0 ? 0 : (pressure[current] / n_total) / (weights[current-1]) + bias;
-        if (power < 0)
-          power = 0;
-        let new_ccurrent = current == 0 ? 0 :
-          power + 0.5 * ccurrent + 0.5 * (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
-        if (new_ccurrent < 0)
-          new_ccurrent = 0;        
-        cfield[pixelindex] = new_ccurrent;
-        if (foreign_count == 0 || endangered[current]) { // Shortcut
-          continue;
-        }
-
-        let new_current = own_max >= foreign_max ? current : pfield[foreign_max_index];
-        if (new_current == 0) // Never let vacuum grow
-          continue;
-        
-        pressure[new_current]--;
-        pressure[current]++;
-        endangered[current] = (desired_count[current] - pressure[current]) < (0.5 * desired_count[current]);
-        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.5 * desired_count[new_current]);
+        endangered[current] = (desired_count[current] - pressure[current]) < (0.1 * desired_count[current]);
+        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.1 * desired_count[new_current]);
         pfield[pixelindex] = new_current;
     }
 }
@@ -280,17 +236,12 @@ function main(tframe) {
     //if (ts < 2000)
     if (!halt) 
       window.requestAnimationFrame(main);
-//    for (let i = 0; i < (tframe ? tframe : 5); i++) {
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 100; i++) {
       ts++;
       applyGraphRule(ts);
     }
     let ostr = "Iter: " + ts + " Max imbalance (nodes): " + pressure.max().toFixed(2)/*.join(", ") */+ " Max Potential: " + cfield.max().toFixed(2) + " Avg Potential: " + cfield.sum() / n_total;// + " Min C: " + AMin(cfield);
     document.getElementById("info").innerHTML = ostr;
-    //
-    //for (let i = 1; i <= n_cluster; i++)
-    //  if (desired_count[i] - prev_pressure[i] < 1 )
-    //    restart();//alert(ts + ":  Partition " + i + " died.");
     // Create the image
     createImage(ts);
     // Draw the image data to the canvas

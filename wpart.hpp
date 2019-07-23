@@ -26,8 +26,8 @@ namespace wpart {
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 struct CAPart {
-	valarray<double> pressure;		// Contains imbalances of each domain. Positive VAL at index X means: Domain X need to grow VAL nodes
-	valarray<double> desired;		// Contains calculated n nodes from weights
+	valarray<double> pressure;		// Contains imbalance of each domain. VAL at index X means: Domain X need to grow / shrink VAL nodes
+	valarray<double> desired;		// Contains calculated node counts from weights
 
 	valarray<uint32_t> border_count; // Contains number of cells for each partition that have a foreign neighbor in graph
 	size_t	n_nodes, n_partitions;
@@ -36,7 +36,7 @@ struct CAPart {
 
 	// INPUT
 	vector<vector<int32_t> > graph;	// Connections between nodes, first vector's size determines N nodes.
-	valarray<double> weights;		// Size of that vector determines how many partitions will be created. Zero weight means auto-calc weight from remainder
+	valarray<double> weights;		// Size of that vector determines how many partitions will be created. Zero value weight means auto-calc weight from remainder
 
 	// OUTPUT ( / INPUT if pre-seeded)
 	valarray<int32_t> partitioning; // Domain index for each node
@@ -59,7 +59,7 @@ struct CAPart {
 	// preseeded (or pre-partitioned) expects either a domain decomposition present
 	// in the partitioning valarray; it will adjust / update that according to weights.
 	// Another possibility is that only seeds are present (single index), the rest
-	// left to void (-1).
+	// left to void value (-1).
 	void init(bool preseeded) {
 		assert(n_nodes > 10);
 		assert(n_partitions >= 2);
@@ -105,28 +105,25 @@ struct CAPart {
 		border_count = 0;
 
 		for (size_t i = 0; i < n_nodes; i++) {
-			vector<int32_t> &neighbors = graph[i];
-			int own_count = 0;
-			double own_sum = 0, own_max = 0;
+			const vector<int32_t> &neighbors = graph[i];
+			double own_sum = 0;
 			int other_count = 0, other_max_domain = 0;
-			double other_sum = 0, other_max = 0;
+			double other_sum = 0, other_max = -1e8;
 
 			int current_domain = partitioning[i];
-			double current_potential = potential[i];
 
+			// Gather sum of neighbor potential, split in "own" and "other"
 			for (unsigned i_n = 0; i_n < neighbors.size(); i_n++) {
-				uint32_t ne = neighbors[i_n];
-				int32_t neighbor_domain = partitioning[ne];
-				double neighbor_potential = potential[ne];
+				const uint32_t &ne = neighbors[i_n];
+				const int32_t &neighbor_domain = partitioning[ne];
+				const double &neighbor_potential = potential[ne];
 
 				if (likely(neighbor_domain == current_domain)) {
 					own_sum += neighbor_potential;
-					own_max = max(own_max, neighbor_potential);
-					own_count++;
 				} else {
 					other_sum += neighbor_potential;
 					if (neighbor_potential > other_max) {
-						other_max = neighbor_potential;
+						other_max = neighbor_potential; // Remember domain of strongest foreign potential
 						other_max_domain = neighbor_domain;
 					}
 					other_count++;
@@ -134,21 +131,24 @@ struct CAPart {
 			}
 
 			if (likely(current_domain >= 0)) {	// Update potential field
-				double power = max((pressure[current_domain] / n_nodes) / (weights[current_domain]), 0.);
-				potential[i] = max(power + 0.5 * current_potential + 0.5 * (own_sum - other_sum) / neighbors.size(), 0.);
+				double power = (pressure[current_domain] / n_nodes) / (weights[current_domain]);
+				if (power < 0)
+					power = 0;
+
+				potential[i] = power + (own_sum - other_sum) / neighbors.size();
 
 				// Endangered domain?
 				if (unlikely((desired[current_domain] - pressure[current_domain]) < (0.5 * desired[current_domain])))
 					continue;
 			}
 
-	        if (likely(other_count == 0)) // Shortcut
-	          continue;
+	        if (likely(other_count == 0)) // Shortcut, surrounded by own domain, nothing more to do.
+	        	continue;
 
-	        if (likely(current_domain >= 0))
+	        if (likely(current_domain >= 0))	// Mark as halo cell
 	        	border_count[current_domain]++; // Just because 'others' are neighboring
 
-	        if (own_max < other_max) { // We alter domain for node i, likely-hood of branch 50/50.
+	        if (potential[i] < 0) { // We alter domain for node i, likely-hood of branch 50/50.
 		        if (likely(current_domain >= 0))
 		        	pressure[current_domain]++;
 		        pressure[other_max_domain]--;

@@ -4,16 +4,17 @@
 <meta charset="UTF-8">
 </head>
 <body>
+  <div style="font-family:monospace;font-size:large">Weighted graph partitioning using CA rules. First two partition weights can be entered (between 0 and 1) 0 == equal as other weights.</div>
   <div id="info" style="font-family:monospace;font-size:large">PARTITION INFO</div>
   <div>
     <button onclick="halt=!halt;main()">PAUSE</button>
-    N_PARTITIONS:<input id="np" type="text" size="5" value="100" maxlength="4"/>
-    W0:<input id="w0" type="text" size="6" maxlength="5" value="0.5"/>
-    W1:<input id="w1" type="text" size="6" maxlength="5" value="0.1"/>
+    N_PARTITIONS:<input id="np" type="text" size="5" value="4" maxlength="4"/>
+    W0:<input id="w0" type="text" size="6" maxlength="5" value="0."/>
+    W1:<input id="w1" type="text" size="6" maxlength="5" value="0."/>
     <button onclick="halt=true;restart()">Restart</button>
   </div>
-  <canvas id="view1" width="200" height="200" style="width: 49%"></canvas>
-  <canvas id="view2" width="200" height="200" style="width: 49%"></canvas>
+  <canvas id="view1" width="100" height="100" style="width: 49%"></canvas>
+  <canvas id="view2" width="100" height="100" style="width: 49%"></canvas>
   <script type="text/javascript" src="script.js"></script>
 </body>
 </html>

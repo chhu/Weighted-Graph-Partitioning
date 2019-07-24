@@ -13,6 +13,7 @@
 #define WPART_HPP_
 
 #include <vector>
+#include <set>
 #include <cassert>
 #include <valarray>
 #include <math.h>
@@ -65,6 +66,7 @@ struct CAPart {
 		partitioning.resize(n_nodes, -1);
 		no_alterations = false;
 		bias = 0;
+		split = coarse = NULL;
 		if (grf.is_open()) { // Read graph from file
 			int dummy, entries, i = 0;
 			grf >> dummy;grf >> dummy;grf >> dummy; // Values on graph info should probably not be ignored
@@ -81,7 +83,12 @@ struct CAPart {
 			grf.close();
 		}
 	};
-
+/*
+	~CAPart() {
+		if (split != NULL) delete split;
+		if (coarse != NULL) delete coarse;
+	}
+*/
 	// preseeded (or pre-partitioned) expects either a domain decomposition present
 	// in the partitioning valarray; it will adjust / update that according to weights.
 	// Another possibility is that only seeds are present (single index), the rest
@@ -92,8 +99,8 @@ struct CAPart {
 		assert((n_partitions * 10) < n_nodes);
 
 		if (preseeded) {
-			assert((partitioning >= 0).sum());	// There must be a
-			assert(partitioning.max() < (int)n_partitions);
+			assert(partitioning.min() == 0);	// There must be a partitioning present
+			assert(partitioning.max() == (int)n_partitions - 1);
 		} else {
 			partitioning = -1;
 			// Place seeds
@@ -190,6 +197,60 @@ struct CAPart {
 		return alterations;
 	}
 
+	// For recursive MG operations
+	struct CAPart* split;
+	struct CAPart* coarse;
+
+	void createSplit(unsigned nodes_per_partition) {
+		assert(nodes_per_partition > 10);
+		unsigned n_partitions_split = n_nodes / nodes_per_partition;
+		split = new CAPart(n_nodes, n_partitions_split);
+		split->graph = graph;
+		split->init(false);
+
+		while (split->pressure.max() > 0.1 * nodes_per_partition)
+			split->step();
+		coarse = split->compact(n_partitions);
+		coarse->weights = weights;
+		coarse->init(false);
+	}
+
+	// This method assumes there is a fully partitioned graph present (no voids)
+	CAPart* compact(uint32_t n_partitions_) {
+		assert(n_partitions_ < n_partitions / 10);
+		CAPart* result = new CAPart(n_partitions, n_partitions_);
+		// Build a graph that builds upon current partitions and their neighbors
+		vector<set<int32_t> > compact(n_partitions);
+		for (int i = 0; i < n_nodes; i++) {
+			const vector<int32_t> &neighbors = graph[i];
+			int current_domain = partitioning[i];
+			for (unsigned i_n = 0; i_n < neighbors.size(); i_n++) {
+				int32_t neighbor_domain = partitioning[neighbors[i_n]];
+				if (neighbor_domain != current_domain)
+					compact[current_domain].insert(neighbor_domain);
+			}
+		}
+		// Convert vector<set> to vector<vector>
+		for (int i = 0; i < n_partitions; i++)
+			for (set<int32_t>::iterator it = compact[i].begin(); it != compact[i].end(); ++it)
+				result->graph[i].push_back(*it);
+
+		return result;
+	}
+
+	// Projects mapping from this graph onto target using split as map
+	void project(CAPart* split, CAPart* target) {
+		assert(split->n_nodes == target->n_nodes);
+		assert(target->n_partitions == n_partitions);
+		for (int i = 0; i < target->n_nodes; i++)
+			target->partitioning[i] = partitioning[split->partitioning[i]];
+		target->init(true);	// Forces recalc of pressure
+		for (int i = 0; i < target->n_nodes; i++) // Project potential as well
+			target->potential[i] = potential[split->partitioning[i]]; // TODO scaling is wrong
+
+	}
+
+
 	// Helpers
 
 	// Return max potential (centroid) positions for domains
@@ -219,6 +280,11 @@ struct CAPart {
 		init(true);
 	}
 };
+
+struct CAPartMG {
+
+};
+
 };
 
 #endif /* WPART_HPP_ */

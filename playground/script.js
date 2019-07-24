@@ -147,7 +147,7 @@ function applyGraphRule(fr) {
         if (power < 0)
           power = 0;
         else 
-          power += bias;
+          power += bias + (endangered[current] ? 1 : 0);
 
         let new_ccurrent = current == 0 ? 0 :
           power + (own_sum - foreign_sum) / ne.length;// - 0.2 * foreign_sum / 4/*neighbors.length*/);// - (foreign_count ? foreign_sum / foreign_count : 0);
@@ -163,8 +163,8 @@ function applyGraphRule(fr) {
         
         pressure[new_current]--;
         pressure[current]++;
-        endangered[current] = (desired_count[current] - pressure[current]) < (0.1 * desired_count[current]);
-        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.1 * desired_count[new_current]);
+        endangered[current] = (desired_count[current] - pressure[current]) < (0.2 * desired_count[current]);
+        endangered[new_current] = (desired_count[new_current] - pressure[new_current]) < (0.2 * desired_count[new_current]);
         pfield[pixelindex] = new_current;
     }
 }

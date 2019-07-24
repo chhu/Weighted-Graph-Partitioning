@@ -21,13 +21,29 @@ int main(int argc, char **argv) {
 	CAPart dc(dummy, n_part, argv[3]);
 	cerr << "Input graph has " << dc.n_nodes << " nodes." << endl;
 	dc.init(false);
+/*
+	dc.createSplit(200);
+	cerr << "Split took " << dc.split->iteration << " iterations\n";
+	unsigned alts = 0; i = 0;
+//	while ((abs(dc.pressure).max() > 5) || (dc.pressure.sum() != 0)) {
+	while (i < n_iter) {
+		i++;
+		alts += dc.coarse->step();
+		if (i%100 == 0) {
+			cerr << "COARSE " << alts << " PMAX: " << 100. * abs(dc.coarse->pressure).max() / dc.coarse->desired[0] << "% "<< " Halo: " << 100. * dc.coarse->border_count.sum() / (float)dc.coarse->n_nodes << "% PotMAX " << dc.coarse->potential.max()<< endl;
+			if (alts < 100)
+				break;
+			alts = 0;
+		}
+	}
+	dc.coarse->project(dc.split, &dc);*/
 	unsigned alts = 0; i = 0;
 //	while ((abs(dc.pressure).max() > 5) || (dc.pressure.sum() != 0)) {
 	while (i < n_iter) {
 		i++;
 		alts += dc.step();
-		if (i%1000 == 0) {
-			cerr << alts << " PMAX: " << 100. * abs(dc.pressure).max() / dc.desired[0] << "% "<< " Halo: " << 100. * dc.border_count.sum() / (float)dc.n_nodes << "% PotMAX " << dc.potential.max()<< endl;
+		if (i%100 == 0) {
+			cerr << "FINAL " << alts << " PMAX: " << 100. * abs(dc.pressure).max() / dc.desired[0] << "% "<< " Halo: " << 100. * dc.border_count.sum() / (float)dc.n_nodes << "% PotMAX " << dc.potential.max()<< endl;
 			if (alts < 100)
 				break;
 			alts = 0;

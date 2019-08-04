@@ -112,7 +112,8 @@ struct CAPart {
 
 		// Translate weights to node counts
 		double total_weights = weights.sum();
-		assert(total_weights <= 1 && total_weights >= 0);
+		cerr << total_weights << endl;
+		assert(total_weights <= 1 + 1e-6 && total_weights >= 0);
 
 		double remainder = (1 - total_weights);
 
@@ -201,14 +202,14 @@ struct CAPart {
 	struct CAPart* split;
 	struct CAPart* coarse;
 
-	void createSplit(unsigned nodes_per_partition) {
+	void createSplit(unsigned nodes_per_partition, float sub_precision) {
 		assert(nodes_per_partition > 10);
 		unsigned n_partitions_split = n_nodes / nodes_per_partition;
 		split = new CAPart(n_nodes, n_partitions_split);
 		split->graph = graph;
 		split->init(false);
 
-		while (split->pressure.max() > 0.1 * nodes_per_partition)
+		while (split->pressure.max() > sub_precision * nodes_per_partition)
 			split->step();
 		coarse = split->compact(n_partitions);
 		coarse->weights = weights;
@@ -281,9 +282,6 @@ struct CAPart {
 	}
 };
 
-struct CAPartMG {
-
-};
 
 };
 
